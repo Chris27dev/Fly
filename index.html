@@ -682,6 +682,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     --high: #0d2a4a;
     --ground: #8a97a6;
   }
+  [hidden] { display: none !important; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -810,7 +811,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
         alt_baro: s[8] ? "ground" : (s[7] != null ? s[7] * 3.28084 : null),
         gs: s[9] != null ? s[9] * 1.94384 : null, track: s[10],
         baro_rate: s[11] != null ? Math.round(s[11] * 196.85) : null, squawk: s[14]
-      })) }
+      })) },
+    { name: "adsb.lol via Proxy 1", proxy: true, url: (lat, lon, r) => "https://corsproxy.io/?url=" + encodeURIComponent(`https://api.adsb.lol/v2/point/${lat}/${lon}/${r}`), parse: readsb },
+    { name: "airplanes.live via Proxy 2", proxy: true, url: (lat, lon, r) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(`https://api.airplanes.live/v2/point/${lat}/${lon}/${r}`), parse: readsb }
   ];
 
   const map = L.map("map", { zoomControl: true }).setView(SCHIPHOL, 10);
@@ -972,7 +975,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
         render();
         statusEl.lastElementChild.textContent += " · " + api.name;
         return;
-      } catch (e) { errors.push(api.name + ": " + (e.message || e)); }
+      } catch (e) {
+        let hint = "";
+        if (!api.proxy) {
+          try { await fetch(api.url(lat, lon, r), { mode: "no-cors" }); hint = " (erreichbar, CORS verweigert)"; }
+          catch { hint = " (nicht erreichbar)"; }
+        }
+        errors.push(api.name + ": " + (e.message || e) + hint);
+      }
     }
     setStatus("Keine Flugdaten erreichbar", errors.join(" | "), true);
   }
