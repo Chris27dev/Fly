@@ -770,8 +770,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <label>Radius
       <select id="radius">
         <option value="10">10 NM</option>
-        <option value="25" selected>25 NM</option>
-        <option value="50">50 NM</option>
+        <option value="25">25 NM</option>
+        <option value="50" selected>50 NM</option>
         <option value="100">100 NM</option>
       </select>
     </label>
@@ -798,6 +798,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   // Öffentliche ADS-B-APIs ohne Key. Jede liefert am Ende das gleiche Format.
   const NM = 1852;
   const readsb = d => d.ac || d.aircraft || [];
+  const AO = u => "https://api.allorigins.win/raw?disableCache=true&url=" + encodeURIComponent(u);
   const APIS = [
     { name: "adsb.lol",      url: (lat, lon, r) => `https://api.adsb.lol/v2/point/${lat}/${lon}/${r}`, parse: readsb },
     { name: "airplanes.live", url: (lat, lon, r) => `https://api.airplanes.live/v2/point/${lat}/${lon}/${r}`, parse: readsb },
@@ -812,8 +813,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
         gs: s[9] != null ? s[9] * 1.94384 : null, track: s[10],
         baro_rate: s[11] != null ? Math.round(s[11] * 196.85) : null, squawk: s[14]
       })) },
-    { name: "adsb.lol via Proxy 1", proxy: true, url: (lat, lon, r) => "https://corsproxy.io/?url=" + encodeURIComponent(`https://api.adsb.lol/v2/point/${lat}/${lon}/${r}`), parse: readsb },
-    { name: "airplanes.live via Proxy 2", proxy: true, url: (lat, lon, r) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(`https://api.airplanes.live/v2/point/${lat}/${lon}/${r}`), parse: readsb }
+    { name: "adsb.lol (Proxy)",      proxy: true, url: (lat, lon, r) => AO(`https://api.adsb.lol/v2/point/${lat}/${lon}/${r}`), parse: readsb },
+    { name: "airplanes.live (Proxy)", proxy: true, url: (lat, lon, r) => AO(`https://api.airplanes.live/v2/point/${lat}/${lon}/${r}`), parse: readsb },
+    { name: "adsb.fi (Proxy)",       proxy: true, url: (lat, lon, r) => AO(`https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${r}`), parse: readsb },
+    { name: "adsb.lol (Proxy 2)",    proxy: true, url: (lat, lon, r) => "https://corsproxy.io/?url=" + encodeURIComponent(`https://api.adsb.lol/v2/point/${lat}/${lon}/${r}`), parse: readsb }
   ];
 
   const map = L.map("map", { zoomControl: true }).setView(SCHIPHOL, 10);
@@ -962,16 +965,22 @@ svg.leaflet-image-layer.leaflet-interactive path {
     statusEl.innerHTML = `<span>${left}</span><span>${right || ""}</span>`;
   }
 
+  let preferred = 0;
   async function load() {
     const [lat, lon] = SCHIPHOL;
     const r = radiusEl.value;
     const errors = [];
-    for (const api of APIS) {
+    let emptyFrom = null;
+    const order = [preferred, ...APIS.map((_, i) => i).filter(i => i !== preferred)];
+    for (const i of order) {
+      const api = APIS[i];
       try {
         const res = await fetch(api.url(lat, lon, r));
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
-        planes = api.parse(data).filter(p => p.lat != null && p.lon != null && p.hex);
+        const list = api.parse(data).filter(p => p.lat != null && p.lon != null && p.hex);
+        if (list.length === 0) { emptyFrom = emptyFrom || api.name; errors.push(api.name + ": 0 Flugzeuge"); continue; }
+        planes = list; preferred = i;
         render();
         statusEl.lastElementChild.textContent += " · " + api.name;
         return;
@@ -984,7 +993,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
         errors.push(api.name + ": " + (e.message || e) + hint);
       }
     }
-    setStatus("Keine Flugdaten erreichbar", errors.join(" | "), true);
+    if (emptyFrom) {
+      planes = []; render();
+      statusEl.lastElementChild.textContent = new Date().toLocaleTimeString("de-DE") + " · alle erreichbaren Quellen melden 0 im Radius";
+    } else {
+      setStatus("Keine Flugdaten erreichbar", errors.join(" | "), true);
+    }
   }
 
   function restart() {
